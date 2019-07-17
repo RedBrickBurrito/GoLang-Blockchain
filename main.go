@@ -19,6 +19,7 @@ func (cli *CommandLine) printUsage() {
 	fmt.Println(" createblockchain -address ADDRESS creates a blockchain and sends genesis reward to address")
 	fmt.Println(" printchain - Prints the blocks in the chain")
 	fmt.Println(" send -from FROM -to TO -amount AMOUNT - Send amount of coins")
+	fmt.Println("eraseblockchain - Erases all data of the blockchain")
 }
 
 func (cli *CommandLine) createblockchain(address string) {
@@ -38,7 +39,7 @@ func (cli *CommandLine) getbalance(address string) {
 		balance += out.Value
 	}
 
-	fmt.Println("Balance of %s: %d\n", address, balance)
+	fmt.Printf("Balance of %s : %d\n", address, balance)
 }
 
 func (cli *CommandLine) send(from, to string, amount int) {
@@ -68,13 +69,18 @@ func (cli *CommandLine) printChain() {
 		fmt.Printf("Previous Hash: %x\n", block.PrevHash)
 		fmt.Printf("Hash: %x\n", block.Hash)
 		pow := blockchain.NewProof(block)
-		fmt.Println("Pow: %s\n", strconv.FormatBool(pow.Validate()))
+		fmt.Printf("Pow: %s\n", strconv.FormatBool(pow.Validate()))
 		fmt.Println()
 
 		if len(block.PrevHash) == 0 {
 			break
 		}
 	}
+}
+
+func (cli *CommandLine) eraseblockchain() {
+	blockchain.EraseBlockchain()
+	fmt.Println("The blockchain has been erased")
 }
 
 func (cli *CommandLine) run() {
@@ -84,6 +90,7 @@ func (cli *CommandLine) run() {
 	createBlockchainCmd := flag.NewFlagSet("createblockchain", flag.ExitOnError)
 	sendCmd := flag.NewFlagSet("send", flag.ExitOnError)
 	printChainCmd := flag.NewFlagSet("print", flag.ExitOnError)
+	eraseblockchain := flag.NewFlagSet("eraseblockchain", flag.ExitOnError)
 
 	getBalanceAddress := getBalanceCmd.String("address", "", "The address to get balance for")
 	createBlockchainAddress := createBlockchainCmd.String("address", "", "The address to send genesis block reward to")
@@ -104,6 +111,11 @@ func (cli *CommandLine) run() {
 		}
 	case "printchain":
 		err := printChainCmd.Parse(os.Args[2:])
+		if err != nil {
+			log.Panic(err)
+		}
+	case "eraseblockchain":
+		err := eraseblockchain.Parse(os.Args[2:])
 		if err != nil {
 			log.Panic(err)
 		}
@@ -139,6 +151,10 @@ func (cli *CommandLine) run() {
 		}
 
 		cli.send(*sendFrom, *sendTo, *sendAmount)
+	}
+
+	if eraseblockchain.Parsed() {
+		cli.eraseblockchain()
 	}
 
 }

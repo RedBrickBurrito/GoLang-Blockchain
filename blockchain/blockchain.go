@@ -227,3 +227,9 @@ Work:
 
 	return accumulated, unspentOuts
 }
+
+func EraseBlockchain() {
+	os.Remove("000000.vlog")
+	os.Remove("000002.sst")
+	os.Remove("MANIFEST")
+}
