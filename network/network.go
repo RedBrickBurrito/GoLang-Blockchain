@@ -9,9 +9,9 @@ import (
 	"io/ioutil"
 	"log"
 	"net"
-	"os"
-	"runtime"
 	"syscall"
+	"runtime"
+	"os"
 
 	"gopkg.in/vrecan/death.v3"
 
@@ -90,14 +90,14 @@ func BytesToCmd(bytes []byte) string {
 	return fmt.Sprintf("%s", cmd)
 }
 
+func ExtractCmd(request []byte) []byte {
+	return request[:commandLength]
+}
+
 func RequestBlocks() {
 	for _, node := range KnownNodes {
 		SendGetBlocks(node)
 	}
-}
-
-func ExtractCmd(request []byte) []byte {
-	return request[:commandLength]
 }
 
 func SendAddr(address string) {
@@ -117,10 +117,50 @@ func SendBlock(addr string, b *blockchain.Block) {
 	SendData(addr, request)
 }
 
+func SendData(addr string, data []byte) {
+	conn, err := net.Dial(protocol, addr)
+
+	if err != nil {
+		fmt.Printf("%s is not available\n", addr)
+		var updatedNodes []string
+
+		for _, node := range KnownNodes {
+			if node != addr {
+				updatedNodes = append(updatedNodes, node)
+			}
+		}
+
+		KnownNodes = updatedNodes
+
+		return
+	}
+
+	defer conn.Close()
+
+	_, err = io.Copy(conn, bytes.NewReader(data))
+	if err != nil {
+		log.Panic(err)
+	}
+}
+
 func SendInv(address, kind string, items [][]byte) {
 	inventory := Inv{nodeAddress, kind, items}
 	payload := GobEncode(inventory)
 	request := append(CmdToBytes("inv"), payload...)
+
+	SendData(address, request)
+}
+
+func SendGetBlocks(address string) {
+	payload := GobEncode(GetBlocks{nodeAddress})
+	request := append(CmdToBytes("getblocks"), payload...)
+
+	SendData(address, request)
+}
+
+func SendGetData(address, kind string, id []byte) {
+	payload := GobEncode(GetData{nodeAddress, kind, id})
+	request := append(CmdToBytes("getdata"), payload...)
 
 	SendData(address, request)
 }
@@ -142,20 +182,6 @@ func SendVersion(addr string, chain *blockchain.BlockChain) {
 	SendData(addr, request)
 }
 
-func SendGetBlocks(address string) {
-	payload := GobEncode(GetBlocks{nodeAddress})
-	request := append(CmdToBytes("getblocks"), payload...)
-
-	SendData(address, request)
-}
-
-func SendGetData(address, kind string, id []byte) {
-	payload := GobEncode(GetData{nodeAddress, kind, id})
-	request := append(CmdToBytes("getdata"), payload...)
-
-	SendData(address, request)
-}
-
 func HandleAddr(request []byte) {
 	var buff bytes.Buffer
 	var payload Addr
@@ -165,6 +191,7 @@ func HandleAddr(request []byte) {
 	err := dec.Decode(&payload)
 	if err != nil {
 		log.Panic(err)
+
 	}
 
 	KnownNodes = append(KnownNodes, payload.AddrList...)
@@ -199,6 +226,43 @@ func HandleBlock(request []byte, chain *blockchain.BlockChain) {
 	} else {
 		UTXOSet := blockchain.UTXOSet{chain}
 		UTXOSet.Reindex()
+	}
+}
+
+func HandleInv(request []byte, chain *blockchain.BlockChain) {
+	var buff bytes.Buffer
+	var payload Inv
+
+	buff.Write(request[commandLength:])
+	dec := gob.NewDecoder(&buff)
+	err := dec.Decode(&payload)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	fmt.Printf("Recevied inventory with %d %s\n", len(payload.Items), payload.Type)
+
+	if payload.Type == "block" {
+		blocksInTransit = payload.Items
+
+		blockHash := payload.Items[0]
+		SendGetData(payload.AddrFrom, "block", blockHash)
+
+		newInTransit := [][]byte{}
+		for _, b := range blocksInTransit {
+			if bytes.Compare(b, blockHash) != 0 {
+				newInTransit = append(newInTransit, b)
+			}
+		}
+		blocksInTransit = newInTransit
+	}
+
+	if payload.Type == "tx" {
+		txID := payload.Items[0]
+
+		if memoryPool[hex.EncodeToString(txID)].ID == nil {
+			SendGetData(payload.AddrFrom, "tx", txID)
+		}
 	}
 }
 
@@ -243,7 +307,6 @@ func HandleGetData(request []byte, chain *blockchain.BlockChain) {
 
 		SendTx(payload.AddrFrom, &tx)
 	}
-
 }
 
 func HandleTx(request []byte, chain *blockchain.BlockChain) {
@@ -296,7 +359,7 @@ func MineTx(chain *blockchain.BlockChain) {
 	txs = append(txs, cbTx)
 
 	newBlock := chain.MineBlock(txs)
-	UTXOSet := blockchain.UTXOSet{chain}
+	UTXOSet  := blockchain.UTXOSet{chain}
 	UTXOSet.Reindex()
 
 	fmt.Println("New Block mined")
@@ -314,44 +377,6 @@ func MineTx(chain *blockchain.BlockChain) {
 
 	if len(memoryPool) > 0 {
 		MineTx(chain)
-	}
-
-}
-
-func HandleInv(request []byte, chain *blockchain.BlockChain) {
-	var buff bytes.Buffer
-	var payload Inv
-
-	buff.Write(request[commandLength:])
-	dec := gob.NewDecoder(&buff)
-	err := dec.Decode(&payload)
-	if err != nil {
-		log.Panic(err)
-	}
-
-	fmt.Printf("Received inventory with %d %s \n", len(payload.Type))
-
-	if payload.Type == "block" {
-		blocksInTransit = payload.Items
-
-		blockHash := payload.Items[0]
-		SendGetData(payload.AddrFrom, "block", blockHash)
-
-		newInTransit := [][]byte{}
-		for _, b := range blocksInTransit {
-			if bytes.Compare(b, blockHash) != 0 {
-				newInTransit = append(newInTransit, b)
-			}
-		}
-		blocksInTransit = newInTransit
-	}
-
-	if payload.Type == "tx" {
-		txID := payload.Items[0]
-
-		if memoryPool[hex.EncodeToString(txID)].ID == nil {
-			SendGetData(payload.AddrFrom, "tx", txID)
-		}
 	}
 }
 
@@ -378,39 +403,12 @@ func HandleVersion(request []byte, chain *blockchain.BlockChain) {
 	if !NodeIsKnown(payload.AddrFrom) {
 		KnownNodes = append(KnownNodes, payload.AddrFrom)
 	}
-
-}
-
-func SendData(addr string, data []byte) {
-	conn, err := net.Dial(protocol, addr)
-
-	if err != nil {
-		fmt.Printf("%s is not available", addr)
-		var updatedNodes []string
-
-		for _, node := range KnownNodes {
-			if node != addr {
-				updatedNodes = append(updatedNodes, node)
-			}
-		}
-
-		KnownNodes = updatedNodes
-
-		return
-	}
-
-	defer conn.Close()
-
-	_, err = io.Copy(conn, bytes.NewReader(data))
-	if err != nil {
-		log.Panic(err)
-	}
 }
 
 func HandleConnection(conn net.Conn, chain *blockchain.BlockChain) {
 	req, err := ioutil.ReadAll(conn)
 	defer conn.Close()
-
+	
 	if err != nil {
 		log.Panic(err)
 	}
@@ -435,11 +433,12 @@ func HandleConnection(conn net.Conn, chain *blockchain.BlockChain) {
 	default:
 		fmt.Println("Unknown command")
 	}
+
 }
 
 func StartServer(nodeID, minerAddress string) {
 	nodeAddress = fmt.Sprintf("localhost:%s", nodeID)
-	minerAddress = minerAddress
+	mineAddress = minerAddress
 	ln, err := net.Listen(protocol, nodeAddress)
 	if err != nil {
 		log.Panic(err)
@@ -459,6 +458,7 @@ func StartServer(nodeID, minerAddress string) {
 			log.Panic(err)
 		}
 		go HandleConnection(conn, chain)
+
 	}
 }
 
@@ -480,6 +480,7 @@ func NodeIsKnown(addr string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
