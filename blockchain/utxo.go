@@ -71,7 +71,7 @@ func (u UTXOSet) CountTransactions() int {
 	return counter
 }
 
-func (u UTXOSet) FindUTXO(pubKeyHash []byte) []TxOutput {
+func (u UTXOSet) FindUnspentTransactions(pubKeyHash []byte) []TxOutput {
 	var UTXOs []TxOutput
 
 	db := u.Blockchain.Database
@@ -87,14 +87,13 @@ func (u UTXOSet) FindUTXO(pubKeyHash []byte) []TxOutput {
 			v, err := item.Value()
 			Handle(err)
 			outs := DeserializeOutputs(v)
-
 			for _, out := range outs.Outputs {
 				if out.IsLockedWithKey(pubKeyHash) {
 					UTXOs = append(UTXOs, out)
 				}
 			}
-		}
 
+		}
 		return nil
 	})
 	Handle(err)
@@ -130,7 +129,7 @@ func (u *UTXOSet) Update(block *Block) {
 	db := u.Blockchain.Database
 
 	err := db.Update(func(txn *badger.Txn) error {
-		for _, tx := range block.Transcations {
+		for _, tx := range block.Transactions {
 			if tx.IsCoinbase() == false {
 				for _, in := range tx.Inputs {
 					updatedOuts := TxOutputs{}

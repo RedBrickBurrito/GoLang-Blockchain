@@ -16,13 +16,13 @@ import (
 	"github.com/RedBrickBurrito/GoLang-Blockchain/wallet"
 )
 
-type Transcation struct {
+type Transaction struct {
 	ID      []byte
 	Inputs  []TxInput
 	Outputs []TxOutput
 }
 
-func (tx Transcation) Serialize() []byte {
+func (tx Transaction) Serialize() []byte {
 	var encoded bytes.Buffer
 
 	enc := gob.NewEncoder(&encoded)
@@ -34,7 +34,16 @@ func (tx Transcation) Serialize() []byte {
 	return encoded.Bytes()
 }
 
-func (tx *Transcation) Hash() []byte {
+func DeserializeTransaction(data []byte) Transaction {
+	var transaction Transaction
+
+	decoder := gob.NewDecoder(bytes.NewReader(data))
+	err := decoder.Decode(&transaction)
+	Handle(err)
+	return transaction
+}
+
+func (tx *Transaction) Hash() []byte {
 	var hash [32]byte
 
 	txCopy := *tx
@@ -45,7 +54,7 @@ func (tx *Transcation) Hash() []byte {
 	return hash[:]
 }
 
-func CoinbaseTx(to, data string) *Transcation {
+func CoinbaseTx(to, data string) *Transaction {
 	if data == "" {
 		randData := make([]byte, 24)
 		_, err := rand.Read(randData)
@@ -56,21 +65,17 @@ func CoinbaseTx(to, data string) *Transcation {
 	txin := TxInput{[]byte{}, -1, nil, []byte(data)}
 	txout := NewTXOutput(20, to)
 
-	tx := Transcation{nil, []TxInput{txin}, []TxOutput{*txout}}
+	tx := Transaction{nil, []TxInput{txin}, []TxOutput{*txout}}
 	tx.ID = tx.Hash()
 
 	return &tx
 }
 
-func NewTranscation(from, to string, amount int, UTXO *UTXOSet) *Transcation {
+func NewTransaction(w *wallet.Wallet, to string, amount int, UTXO *UTXOSet) *Transaction {
 	var inputs []TxInput
 	var outputs []TxOutput
 
-	wallets, err := wallet.CreateWallets()
-	Handle(err)
-	w := wallets.GetWallet(from)
 	pubKeyHash := wallet.PublicKeyHash(w.PublicKey)
-
 	acc, validOutputs := UTXO.FindSpendableOutputs(pubKeyHash, amount)
 
 	if acc < amount {
@@ -87,24 +92,26 @@ func NewTranscation(from, to string, amount int, UTXO *UTXOSet) *Transcation {
 		}
 	}
 
+	from := fmt.Sprintf("%s", w.Address())
+
 	outputs = append(outputs, *NewTXOutput(amount, to))
 
 	if acc > amount {
 		outputs = append(outputs, *NewTXOutput(acc-amount, from))
 	}
 
-	tx := Transcation{nil, inputs, outputs}
+	tx := Transaction{nil, inputs, outputs}
 	tx.ID = tx.Hash()
 	UTXO.Blockchain.SignTransaction(&tx, w.PrivateKey)
 
 	return &tx
 }
 
-func (tx *Transcation) IsCoinbase() bool {
+func (tx *Transaction) IsCoinbase() bool {
 	return len(tx.Inputs) == 1 && len(tx.Inputs[0].ID) == 0 && tx.Inputs[0].Out == -1
 }
 
-func (tx *Transcation) TrimmedCopy() Transcation {
+func (tx *Transaction) TrimmedCopy() Transaction {
 	var inputs []TxInput
 	var outputs []TxOutput
 
@@ -116,12 +123,12 @@ func (tx *Transcation) TrimmedCopy() Transcation {
 		outputs = append(outputs, TxOutput{out.Value, out.PubKeyHash})
 	}
 
-	txCopy := Transcation{tx.ID, inputs, outputs}
+	txCopy := Transaction{tx.ID, inputs, outputs}
 
 	return txCopy
 }
 
-func (tx *Transcation) Sign(privKey ecdsa.PrivateKey, prevTxs map[string]Transcation) {
+func (tx *Transaction) Sign(privKey ecdsa.PrivateKey, prevTxs map[string]Transaction) {
 	if tx.IsCoinbase() {
 		return
 	}
@@ -149,7 +156,7 @@ func (tx *Transcation) Sign(privKey ecdsa.PrivateKey, prevTxs map[string]Transca
 	}
 }
 
-func (tx *Transcation) Verify(prevTxs map[string]Transcation) bool {
+func (tx *Transaction) Verify(prevTxs map[string]Transaction) bool {
 	if tx.IsCoinbase() {
 		return true
 	}
@@ -192,7 +199,7 @@ func (tx *Transcation) Verify(prevTxs map[string]Transcation) bool {
 	return true
 }
 
-func (tx Transcation) String() string {
+func (tx Transaction) String() string {
 	var lines []string
 
 	lines = append(lines, fmt.Sprintf("--- Transaction %x:", tx.ID))
