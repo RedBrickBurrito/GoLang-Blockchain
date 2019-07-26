@@ -1,2 +1,2 @@
 # GoLang-Blockchain
-Blockchain written in Go usin Proof of Work.
+Blockchain written in Go using Proof of Work.
