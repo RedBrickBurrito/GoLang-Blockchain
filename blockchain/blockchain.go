@@ -33,8 +33,8 @@ func DBexists(path string) bool {
 	return true
 }
 
-func ContinueBlockChain(nodeID string) *BlockChain {
-	path := fmt.Sprintf(dbPath, nodeID)
+func ContinueBlockChain(nodeId string) *BlockChain {
+	path := fmt.Sprintf(dbPath, nodeId)
 	if DBexists(path) == false {
 		fmt.Println("No existing blockchain found, create one!")
 		runtime.Goexit()
@@ -61,18 +61,15 @@ func ContinueBlockChain(nodeID string) *BlockChain {
 	chain := BlockChain{lastHash, db}
 
 	return &chain
-
 }
 
 func InitBlockChain(address, nodeId string) *BlockChain {
 	path := fmt.Sprintf(dbPath, nodeId)
-
 	if DBexists(path) {
 		fmt.Println("Blockchain already exists")
 		runtime.Goexit()
 	}
 	var lastHash []byte
-
 	opts := badger.DefaultOptions
 	opts.Dir = path
 	opts.ValueDir = path
@@ -91,6 +88,7 @@ func InitBlockChain(address, nodeId string) *BlockChain {
 		lastHash = genesis.Hash
 
 		return err
+
 	})
 
 	Handle(err)
@@ -124,9 +122,31 @@ func (chain *BlockChain) AddBlock(block *Block) {
 			Handle(err)
 			chain.LastHash = block.Hash
 		}
+
 		return nil
 	})
 	Handle(err)
+}
+
+func (chain *BlockChain) GetBestHeight() int {
+	var lastBlock Block
+
+	err := chain.Database.View(func(txn *badger.Txn) error {
+		item, err := txn.Get([]byte("lh"))
+		Handle(err)
+		lastHash, _ := item.Value()
+
+		item, err = txn.Get(lastHash)
+		Handle(err)
+		lastBlockData, _ := item.Value()
+
+		lastBlock = *Deserialize(lastBlockData)
+
+		return nil
+	})
+	Handle(err)
+
+	return lastBlock.Height
 }
 
 func (chain *BlockChain) GetBlock(blockHash []byte) (Block, error) {
@@ -165,27 +185,6 @@ func (chain *BlockChain) GetBlockHashes() [][]byte {
 	}
 
 	return blocks
-}
-
-func (chain *BlockChain) GetBestHeight() int {
-	var lastBlock Block
-
-	err := chain.Database.View(func(txn *badger.Txn) error {
-		item, err := txn.Get([]byte("lh"))
-		Handle(err)
-		lastHash, _ := item.Value()
-
-		item, err = txn.Get(lastHash)
-		Handle(err)
-		lastBlockData, _ := item.Value()
-
-		lastBlock = *Deserialize(lastBlockData)
-
-		return nil
-	})
-	Handle(err)
-
-	return lastBlock.Height
 }
 
 func (chain *BlockChain) MineBlock(transactions []*Transaction) *Block {
@@ -342,10 +341,4 @@ func openDB(dir string, opts badger.Options) (*badger.DB, error) {
 	} else {
 		return db, nil
 	}
-}
-
-func EraseBlockchain() {
-	os.Remove("000000.vlog")
-	os.Remove("000002.sst")
-	os.Remove("MANIFEST")
 }
